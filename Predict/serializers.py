@@ -5,4 +5,4 @@ from .models import Predict
 class ImageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Predict
-        fields = ('image',)
+        fields = ('image','modelName')

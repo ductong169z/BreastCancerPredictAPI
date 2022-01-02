@@ -17,8 +17,10 @@ from django.contrib import admin
 from django.urls import path
 
 from Predict.views import ImageView
+from UploadModel.views import UploadModelView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('predict/',ImageView.as_view()),
+    path('uploadModel/',UploadModelView.as_view()),
 ]
