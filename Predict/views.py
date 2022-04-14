@@ -5,8 +5,9 @@ import cv2
 import tensorflow as tf
 import numpy as np
 import os
+import io
 from skimage import transform
-
+import matplotlib.pyplot as plt
 import base64
 from django.http import StreamingHttpResponse
 from rest_framework.views import APIView
@@ -56,6 +57,83 @@ class ImageView(APIView):
         x_img = preprocess_input(x_img)
     
         return x_img
+    @staticmethod    
+    def gradcam(model,file):
+        print(file);
+        img_path=file.image.name
+        x_img = ImageView.process_image(img_path)
+        #print_predicted_result(x_img)
+    
+        img_sample = cv2.imread(img_path)
+        plt.rcParams['figure.figsize'] = (8.0, 8.0)
+    
+        # Get the output feature map from the target layer
+        target_layer = model.get_layer("conv_pw_13_relu")
+        # target_layer = model.get_layer("mobilenet_1.00_224")
+    
+        prediction = model.predict(x_img)
+        prediction_idx = np.argmax(prediction)
+    
+        # Fix gradient error
+        with tf.GradientTape() as tape:
+            # Create a model with original model inputs and the last conv_layer as the output
+            gradient_model = Model([model.inputs], [target_layer.output, model.output])
+            # Pass the image through the base model and get the feature map  
+            conv2d_out, prediction = gradient_model(x_img)
+            # Prediction loss
+            loss = prediction[:, prediction_idx]
+    
+        # gradient() computes the gradient using operations recorded in context of this tape
+        gradients = tape.gradient(loss, conv2d_out)
+    
+        # Obtain the output from shape [1 x H x W x CHANNEL] -> [H x W x CHANNEL]
+        output = conv2d_out[0]
+    
+        # Obtain depthwise mean
+        weights = tf.reduce_mean(gradients[0], axis=(0, 1))
+    
+        # Create a 7x7 map for aggregation
+        activation_map = np.zeros(output.shape[0:2], dtype=np.float32)
+    
+        # Multiply weight for every layer
+        for idx, weight in enumerate(weights):
+            activation_map += weight * output[:, :, idx]
+    
+        test_img = cv2.imread(img_path)
+        original_img = np.asarray(test_img, dtype = np.float32)
+    
+        # Resize to image size
+        activation_map = cv2.resize(activation_map.numpy(), 
+                                    (original_img.shape[1], 
+                                    original_img.shape[0]))
+        
+        # Ensure no negative number
+        activation_map = np.maximum(activation_map, 0)
+    
+        # Convert class activation map to 0 - 255
+        activation_map = (activation_map - activation_map.min()) / (activation_map.max() - activation_map.min())
+        
+        # Rescale and convert the type to int
+        activation_map = np.uint8(255 * activation_map)
+        
+        # Convert to heatmap
+        heatmap = cv2.applyColorMap(activation_map, cv2.COLORMAP_JET)
+    
+        # Superimpose heatmap onto image
+        original_img = np.uint8((original_img - original_img.min()) / (original_img.max() - original_img.min()) * 255)
+        cvt_heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+        cvt_heatmap = img_to_array(cvt_heatmap)
+        plt.rcParams["figure.dpi"] = 100
+        interpolant=0.6
+        plt.imshow(np.uint8(original_img * interpolant + cvt_heatmap * (1 - interpolant)))
+    
+    
+        plt.savefig('gradcam.png')
+    
+        with open('gradcam.png', "rb") as img_file:
+            b64_string = base64.b64encode(img_file.read())
+            image_base64 = b64_string.decode()
+            return image_base64    
     def post(self, request):
 
         serializer = ImageSerializer(data=request.data)
@@ -78,9 +156,10 @@ class ImageView(APIView):
            
             file.delete()
             print({"status": "success", "name": name, 'score':score,'image': ''});"""
-            with open(file.image.name, "rb") as img_file:
+            """with open(file.image.name, "rb") as img_file:
                 b64_string = base64.b64encode(img_file.read())
-            image = b64_string.decode()
+            image = b64_string.decode()"""
+            image=ImageView.gradcam(model,file)
             return Response({"status": "success", "data": data,'image': image}, status=status.HTTP_200_OK)
         else:
             return Response({"status": "error", "data": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
