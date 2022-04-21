@@ -7,7 +7,11 @@ import numpy as np
 import os
 import io
 from skimage import transform
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use('Agg')
+plt.switch_backend('agg')
+
 import base64
 from django.http import StreamingHttpResponse
 from rest_framework.views import APIView
@@ -24,6 +28,10 @@ from keras.models                         import Model
 
 # Create your views here.
 class ImageView(APIView):
+    """
+    Input :  model,image
+    Output : prediction result
+    """ 
     @staticmethod
     def print_predicted_result(model,img):
         
@@ -40,6 +48,10 @@ class ImageView(APIView):
         # print("Our proposed model is {:.2%}".format(max(pred[0])) + " sure this is {}".format(y_pred))
         # print(data_result)
         return data_result
+    """
+    Input : image_path
+    Output : image with numpy array for channel-wise color normalization
+    """     
     @staticmethod
     def process_image(img_path):
         
@@ -57,15 +69,18 @@ class ImageView(APIView):
         x_img = preprocess_input(x_img)
     
         return x_img
+    """
+    Input : model,image
+    Output : image with gradcam
+    """    
     @staticmethod    
     def gradcam(model,file):
-        print(file);
         img_path=file.image.name
         x_img = ImageView.process_image(img_path)
         #print_predicted_result(x_img)
     
         img_sample = cv2.imread(img_path)
-        plt.rcParams['figure.figsize'] = (8.0, 8.0)
+        #plt.rcParams['figure.figsize'] = (10.0, 10.0)
     
         # Get the output feature map from the target layer
         target_layer = model.get_layer("conv_pw_13_relu")
@@ -125,15 +140,17 @@ class ImageView(APIView):
         cvt_heatmap = img_to_array(cvt_heatmap)
         plt.rcParams["figure.dpi"] = 100
         interpolant=0.6
+    
+        plt.margins(x=0)
+    
         plt.imshow(np.uint8(original_img * interpolant + cvt_heatmap * (1 - interpolant)))
-    
-    
-        plt.savefig('gradcam.png')
-    
+        plt.axis("off")
+        plt.savefig('gradcam.png', transparent=True, bbox_inches='tight')
+        plt.close()
         with open('gradcam.png', "rb") as img_file:
             b64_string = base64.b64encode(img_file.read())
             image_base64 = b64_string.decode()
-            return image_base64    
+            return image_base64
     def post(self, request):
 
         serializer = ImageSerializer(data=request.data)
@@ -143,23 +160,8 @@ class ImageView(APIView):
             
             image=ImageView.process_image(file.image.name)
             data=ImageView.print_predicted_result(model,image)
-            """img_r = cv2.imread(file.image.name)
-            img1 = np.array(img_r).astype('float32') / 255
-            img2 = transform.resize(img1, (128, 128, 3))
-            img = np.expand_dims(img2, axis=0)
-            r = model.predict(img)
-            labels = ["benign", "malignant", "normal"]
-            index = np.argmax(r)
-            score=str(round(r[0][index] * 100, 1)) + "%"
-            name = labels[index]
-           
-           
-            file.delete()
-            print({"status": "success", "name": name, 'score':score,'image': ''});"""
-            """with open(file.image.name, "rb") as img_file:
-                b64_string = base64.b64encode(img_file.read())
-            image = b64_string.decode()"""
             image=ImageView.gradcam(model,file)
+            file.delete()
             return Response({"status": "success", "data": data,'image': image}, status=status.HTTP_200_OK)
         else:
             return Response({"status": "error", "data": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
